@@ -40,7 +40,7 @@ public final class Main implements IXposedHookLoadPackage {
             }
         });
 
-        // Android 15 changes: BaseActivityInterface -> BaseContainerInterface, mActivity -> container, updateTaskSize() -> updateTaskSize(Rect, Rect, Rect)
+        // Android 15 changes: BaseActivityInterface -> BaseContainerInterface, mActivity -> mContainer
         var ctx = Context.class;
         var rect = Rect.class;
         Class<?> baseActivityInterface = null;
@@ -63,34 +63,39 @@ public final class Main implements IXposedHookLoadPackage {
         }
 
 
-        // cheat, temporarily set isTablet, because this method is too insane to reimplement
+        // cheat, temporarily set isTablet, because those methods are too insane to reimplement
+        // https://cs.android.com/android/platform/superproject/+/android14-qpr3-release:packages/apps/Launcher3/quickstep/src/com/android/quickstep/views/RecentsView.java;l=2154?q=updateTaskSize&sq=&ss=android%2Fplatform%2Fsuperproject
         // https://cs.android.com/android/platform/superproject/+/android14-qpr3-release:packages/apps/Launcher3/quickstep/src/com/android/quickstep/views/TaskView.java;l=1714?q=updateTaskSize&sq=&ss=android%2Fplatform%2Fsuperproject
-        var isTablet = dp.getDeclaredField("isTablet");
-        isTablet.setAccessible(true);
-        Field container;
-        try {
-            container = taskView.getDeclaredField("mActivity");
-        } catch (Throwable ignored) {
-            container = taskView.getDeclaredField("container");
-        }
-        container.setAccessible(true);
+        var recentsView = XposedHelpers.findClass("com.android.quickstep.views.RecentsView", cl);
+        Field mActivity = null;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) try {
+            mActivity = recentsView.getDeclaredField("mContainer");
+        } catch (Throwable ignored) {}
+        if (mActivity == null) mActivity = recentsView.getDeclaredField("mActivity");
+        mActivity.setAccessible(true);
         var getDP = XposedHelpers.findClass("com.android.launcher3.views.ActivityContext", cl).getDeclaredMethod("getDeviceProfile");
         getDP.setAccessible(true);
-        var _container = container;
-        for (var m : taskView.getDeclaredMethods()) {
-            if (m.getName().equals("updateTaskSize")) {
-                XposedBridge.hookMethod(m, new XC_MethodHook() {
-                    public void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        isTablet.setBoolean(getDP.invoke(_container.get(param.thisObject)), true);
-                    }
+        var isTablet = dp.getDeclaredField("isTablet");
+        isTablet.setAccessible(true);
+        var activity = mActivity;
+        XposedBridge.hookMethod(recentsView.getDeclaredMethod("updateTaskSize", boolean.class), new XC_MethodHook() {
+            public boolean set = false;
 
-                    public void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        isTablet.setBoolean(getDP.invoke(_container.get(param.thisObject)), false);
-                    }
-                });
-                break;
+            public void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                var deviceProfile = getDP.invoke(activity.get(param.thisObject));
+                if (!isTablet.getBoolean(deviceProfile)) {
+                    set = true;
+                    isTablet.setBoolean(deviceProfile, true);
+                }
             }
-        }
+
+            public void afterHookedMethod(MethodHookParam param) throws Throwable {
+                if (set) {
+                    isTablet.setBoolean(getDP.invoke(activity.get(param.thisObject)), false);
+                    set = false;
+                }
+            }
+        });
 
         var orientedState = XposedHelpers.findClass("com.android.quickstep.util.RecentsOrientedState", cl);
         var setFlag = orientedState.getDeclaredMethod("setFlag", int.class, boolean.class);
@@ -100,5 +105,15 @@ public final class Main implements IXposedHookLoadPackage {
                 setFlag.invoke(param.thisObject, 2, Boolean.FALSE);
             }
         });
+
+        // this runs only if you use another launcher and this is only a quickstep provider
+        XposedBridge.hookMethod(
+            XposedHelpers.findClass("com.android.quickstep.RecentsActivity", cl).getDeclaredMethod("createDeviceProfile"),
+            new XC_MethodHook() {
+                public void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    isTablet.setBoolean(param.getResult(), true);
+                }
+            }
+        );
     }
 }
