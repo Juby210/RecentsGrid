@@ -5,6 +5,7 @@ import android.graphics.Rect;
 import android.os.Build;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import de.robv.android.xposed.*;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
@@ -25,20 +26,25 @@ public final class Main implements IXposedHookLoadPackage {
             }
         });
 
+        var returnTrue = XC_MethodReplacement.returnConstant(Boolean.TRUE);
         XposedBridge.hookMethod(
             XposedHelpers.findClass("com.android.launcher3.uioverrides.states.OverviewState", cl)
                 .getDeclaredMethod("displayOverviewTasksAsGrid", dp),
-            XC_MethodReplacement.returnConstant(Boolean.TRUE)
+            returnTrue
         );
 
         var taskView = XposedHelpers.findClass("com.android.quickstep.views.TaskView", cl);
-        var isFocused = taskView.getDeclaredMethod("isFocusedTask");
-        isFocused.setAccessible(true);
-        XposedBridge.hookMethod(taskView.getDeclaredMethod("isGridTask"), new XC_MethodHook() {
-            public void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                param.setResult(!((boolean) isFocused.invoke(param.thisObject)));
-            }
-        });
+        XC_MethodHook hook;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) hook = returnTrue;
+        else {
+            var isFocused = taskView.getDeclaredMethod("isFocusedTask");
+            hook = new XC_MethodHook() {
+                public void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    param.setResult(!((boolean) isFocused.invoke(param.thisObject)));
+                }
+            };
+        }
+        XposedBridge.hookMethod(taskView.getDeclaredMethod("isGridTask"), hook);
 
         // Android 15 changes: BaseActivityInterface -> BaseContainerInterface, mActivity -> mContainer
         var ctx = Context.class;
@@ -78,7 +84,14 @@ public final class Main implements IXposedHookLoadPackage {
         var isTablet = dp.getDeclaredField("isTablet");
         isTablet.setAccessible(true);
         var activity = mActivity;
-        XposedBridge.hookMethod(recentsView.getDeclaredMethod("updateTaskSize", boolean.class), new XC_MethodHook() {
+
+        Method updateTaskSize;
+        try {
+            updateTaskSize = recentsView.getDeclaredMethod("updateTaskSize");
+        } catch (Throwable ignored) {
+            updateTaskSize = recentsView.getDeclaredMethod("updateTaskSize", boolean.class);
+        }
+        XposedBridge.hookMethod(updateTaskSize, new XC_MethodHook() {
             public boolean set = false;
 
             public void beforeHookedMethod(MethodHookParam param) throws Throwable {
