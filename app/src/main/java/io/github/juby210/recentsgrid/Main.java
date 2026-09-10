@@ -19,12 +19,14 @@ public final class Main implements IXposedHookLoadPackage {
         iconSize.setAccessible(true);
         var iconSizeGrid = dp.getDeclaredField("overviewTaskIconDrawableSizeGridPx");
         iconSizeGrid.setAccessible(true);
-        XposedBridge.hookMethod(dp.getDeclaredConstructors()[0], new XC_MethodHook() {
-            public void afterHookedMethod(MethodHookParam param) throws Throwable {
-                var _this = param.thisObject;
-                iconSizeGrid.setInt(_this, iconSize.getInt(_this));
-            }
-        });
+        for (var c : dp.getDeclaredConstructors()) {
+            XposedBridge.hookMethod(c, new XC_MethodHook() {
+                public void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    var _this = param.thisObject;
+                    iconSizeGrid.setInt(_this, iconSize.getInt(_this));
+                }
+            });
+        }
 
         var returnTrue = XC_MethodReplacement.returnConstant(Boolean.TRUE);
         XposedBridge.hookMethod(
@@ -53,15 +55,21 @@ public final class Main implements IXposedHookLoadPackage {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) try {
             baseActivityInterface = XposedHelpers.findClass("com.android.quickstep.BaseContainerInterface", cl);
         } catch (Throwable ignored) {}
-        if (baseActivityInterface == null) baseActivityInterface = XposedHelpers.findClass("com.android.quickstep.BaseActivityInterface", cl);
-        var calculateFocusTaskSize = baseActivityInterface.getDeclaredMethod("calculateFocusTaskSize", ctx, dp, rect);
+        if (baseActivityInterface == null)
+            baseActivityInterface = XposedHelpers.findClass("com.android.quickstep.BaseActivityInterface", cl);
+        Method calculateFocusTaskSize = null;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) try {
+            calculateFocusTaskSize = baseActivityInterface.getDeclaredMethod("calculateLargeTileSize", ctx, dp, rect);
+        } catch (Throwable ignored) {}
+        if (calculateFocusTaskSize == null)
+            calculateFocusTaskSize = baseActivityInterface.getDeclaredMethod("calculateFocusTaskSize", ctx, dp, rect);
         calculateFocusTaskSize.setAccessible(true);
         for (var m : baseActivityInterface.getDeclaredMethods()) {
             if (m.getName().equals("calculateTaskSize")) {
+                var finalCalculateFocusTaskSize = calculateFocusTaskSize;
                 XposedBridge.hookMethod(m, new XC_MethodHook() {
-                    /** @noinspection JavaReflectionInvocation*/
                     public void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.setResult(calculateFocusTaskSize.invoke(param.thisObject, param.args[0], param.args[1], param.args[2]));
+                        param.setResult(finalCalculateFocusTaskSize.invoke(param.thisObject, param.args[0], param.args[1], param.args[2]));
                     }
                 });
                 break;

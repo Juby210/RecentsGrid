@@ -4,12 +4,12 @@ plugins {
 
 android {
     namespace = "io.github.juby210.recentsgrid"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "io.github.juby210.recentsgrid"
         minSdk = 33
-        targetSdk = 35
+        targetSdk = 37
         versionCode = 3
         versionName = "1.0.2"
     }
